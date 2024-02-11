@@ -1,0 +1,869 @@
+---
+title: "Plants"
+format: html
+execute: 
+  warning: false
+  message: false 
+  echo: false 
+---
+
+<!-- 
+functions and global set ups 
+--> 
+
+```{r load fucntions and set rendering parameters }
+
+options(scipen = 99999, 
+        knirt.kable.na = '')
+
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(gridExtra)
+
+```
+
+```{r fucntion name: forward_HMM_k}
+
+forward_HMM_k <- function(
+    
+    ## returns: joint pmf for a given observed signal 
+    ##            and possible hidden states of a markov chain 
+  
+    TRANSITION_M,  ## obv. a matrix  
+    EMISSION_M, ## matrix of emitted probabilities 
+    EMITTED_SIGNALS,  ## needs to be a vector 
+    STARTING_P, ## needs to be a vector
+    DESIRED_K
+){
+  
+  ## initialize 
+  first_signal = EMITTED_SIGNALS[1] # first signal 
+  STARTING_P * EMISSION_M[rownames(EMISSION_M) == first_signal] -> working_F
+  
+  if(DESIRED_K > 1){
+    ## future states 2, 3, etc... 
+    for( STEPS in 2:DESIRED_K){
+      
+      current_F = rep(NA, length(STARTING_P))
+      
+      for( STATES in 1:length(STARTING_P)){
+        
+        current_F[STATES] <- 
+          EMISSION_M[
+            ## get conditional probs given potential HMM state 
+            rownames(EMISSION_M) ==  
+              ## get probability for the Hidden state we work with here 
+                       EMITTED_SIGNALS[STEPS]][STATES]  * 
+                                                          
+           ## multiply previous Forward F's  with transition probabilities 
+          sum(working_F * TRANSITION_M[,STATES] )
+        
+      }
+      
+      working_F = current_F
+    }
+  }else{
+      current_F = working_F
+    }
+  
+  return(current_F)
+}
+
+```
+
+```{r fucntion name: backward_HMM_k}
+backward_HMM_k <- 
+  function(
+    TRANSITION_M, 
+    EMISSION_M, 
+    EMITTED_SIGNALS, 
+    STARTING_P, 
+    LAST_K
+  ){
+  
+  current_B = rep(1, length(STARTING_P))
+  ## past states states 2, 1, etc... {2 and 1 is all we get in this example} 
+  
+  backward_state_sequence = seq(from = length(EMITTED_SIGNALS) - 1, to = LAST_K, by = -1)
+  
+  for( STEPS in backward_state_sequence){
+  
+    working_B = rep(NA, length(STARTING_P))
+    
+    for( STATES in 1:length(STARTING_P)){
+      
+      working_B[STATES] <- 
+        sum(
+          EMISSION_M[rownames(EMISSION_M) == 
+                       EMITTED_SIGNALS[STEPS + 1]] * 
+          TRANSITION_M[STATES,] * 
+          current_B
+        )
+    }
+    
+    current_B = working_B
+    
+  }
+  
+  return(current_B)
+  }
+```
+
+```{r function name: conditional_pmf}
+conditional_pmf <- 
+  function(
+    DESIRED_STATE, 
+    DESIRED_K_H, 
+    
+    EMITTED_SIGNALS_H, 
+    TRANSITION_M_H, 
+    EMISSION_M_H,
+    STARTING_P_H, 
+    
+    LAST_K_H
+    
+  ){
+    
+    forward_HMM_k(
+      TRANSITION_M = TRANSITION_M_H, 
+      EMISSION_M = EMISSION_M_H, 
+      EMITTED_SIGNALS = EMITTED_SIGNALS_H, 
+      STARTING_P = STARTING_P_H, 
+      DESIRED_K = DESIRED_K_H
+    ) -> forward_part 
+    
+    backward_part <- 
+      
+      ifelse(
+        ## if we want to predict X at the time of last observed 
+        ##    signal, then we will assign B_k all 1 
+        ##    otherwise, we will use the fucntion to calculate our stuff 
+        DESIRED_K_H == length(EMITTED_SIGNALS_H),  
+          
+        rep(1, length(STARTING_P_H)), 
+        
+        backward_HMM_k(
+          TRANSITION_M = TRANSITION_M_H, 
+          EMISSION_M = EMISSION_M_H, 
+          EMITTED_SIGNALS = EMITTED_SIGNALS_H, 
+          STARTING_P = STARTING_P_H, 
+          LAST_K = LAST_K_H
+        )
+      )
+    
+    ### now we need to recreate 
+    
+    prod = forward_part * backward_part
+    
+    results = prod[DESIRED_STATE]/sum(prod)
+    
+    return(results)
+  }
+```
+
+```{r fucntion name: run_one_HMM}
+
+run_one_HMM <- function(signal_seq, starting_prob, transitions_m, emissions_m){
+    
+  prob_seq1 <- c(starting_prob[1], rep(NA, length(signal_seq)))
+  prob_seq2 <- c(starting_prob[2], rep(NA, length(signal_seq)))
+  prob_seq3 <- c(starting_prob[3], rep(NA, length(signal_seq)))
+  
+  for(it in 1:length(signal_seq)){
+    
+    signal_seq_it <- signal_seq[1:it]
+    
+    conditional_pmf(
+      DESIRED_STATE = 1, 
+      DESIRED_K_H = length(signal_seq_it), 
+      TRANSITION_M_H = transitions_m, 
+      EMISSION_M_H = emissions_m, 
+      STARTING_P_H = starting_prob, 
+      EMITTED_SIGNALS_H = signal_seq_it , 
+      
+      LAST_K_H = 1
+    ) -> prob_seq1[(it+1)]
+    
+    conditional_pmf(
+      DESIRED_STATE = 2, 
+      DESIRED_K_H = length(signal_seq_it), 
+      TRANSITION_M_H = transition_m, 
+      EMISSION_M_H = emission_m, 
+      STARTING_P_H = starting_prob, 
+      EMITTED_SIGNALS_H = signal_seq_it , 
+      
+      LAST_K_H = 1
+    ) -> prob_seq2[(it+1)]
+    
+    
+    conditional_pmf(
+      DESIRED_STATE = 3, 
+      DESIRED_K_H = length(signal_seq_it), 
+      TRANSITION_M_H = transition_m, 
+      EMISSION_M_H = emission_m, 
+      STARTING_P_H = starting_prob, 
+      EMITTED_SIGNALS_H = signal_seq_it , 
+      
+      LAST_K_H = 1
+    ) -> prob_seq3[(it+1)]
+  }
+  
+  plot_data = 
+    data.frame(obs = rep(seq(from = 0, to = length(signal_seq), by = 1), 3), 
+               prob = c(prob_seq1, prob_seq2, prob_seq3), 
+               type = c(rep("good", length(prob_seq1)),
+                        rep("sick", length(prob_seq2)),
+                        rep("dead", length(prob_seq3))
+                        )
+               )
+  
+  return(plot_data)
+
+}
+
+```
+
+```{r function name: clip_01}
+clip_01 <- function(x){
+  returned <- ifelse(x < 0, 0, x)
+  returned <- ifelse(returned > 1, 1, returned)
+  return(returned)
+}
+```
+
+# Introduction and Motivation 
+
+In Fall 2023 I took a class covering basics of probability models at the University of Minnesota School of Public 
+Health. For about a month the focus of the class was centered at discrete time Markov Chain and Hidden Markov Chains. 
+Predominantly, my biostatistics curriculum covered regression and frequentists methods of data analysis. It was 
+refreshing to work with models that focus on drastically different concepts. While most examples of Markov Chain 
+focus on weather states (rainy days followed by sunny days, etc...), I immediately through of other ways to apply 
+these methods: passing sequences in soccer and health of my home plants. In this short article I will cover 
+how one might apply HMMs to understand the health of a house plant. 
+
+# Background 
+
+As of 2/3/2023, I have 74 house plants, all varying in size, type, required conditions, and other factors. Among them,
+succulents and alocasia plants are the hardest to take care of. They are not dying, but they aren't thriving as 
+much as other plants. @fig-denis-plant shows one of our alocasia, this one is alocasia sliver dragon, I believe. 
+
+Note that it has some yellow crispy parts on the leaves. Sometimes, the leaves have black circles and marks 
+show up towards the center of the plant. In any case, anything that shows up on a clean nice leaf is referred to 
+as a **mark** by me in further sections. Occasionally, a leaf would die completely and dry out. This made us 
+worry a lot about the condition of out plant, but it seems that this happen periodically. 
+
+```{r, out.width='50%', fig.align='center'}
+#| label: fig-denis-plant
+#| fig-cap: "My homeplant showing healthy leaves and some marks"
+
+
+knitr::include_graphics("IMG_8974.jpeg")
+```
+
+Every time one of the leafs dies or starts to crisp up, we worry that the plant might be *sick* due to under or over watering, of it must be *dying*. Given my limited knowledge of house plants, the only way for me to figure our what is
+going on with the plant is to either: *(a)* stick a moist meter into the soil and he if the plant is over or under watered, or *(b)* take the plant out of the planter and investigate the condition of the roots. This procedure is quite invasive, puts the plant at risk of ripping the roots apart, and is honestly quite messy. I do not plan to 
+stop having these plants at home, maybe there is a data driven way to look at my plants' health. 
+
+# Statistical Methods 
+
+**Conditional Probabilities**
+
+In Markov Chains, probability of the next state depends only on the current state, i.e. $P(X_{i+1} = j | X_{i} = k)$. 
+But, in the Hidden Markov Chain (HMM), we only get to observe a signal $S_{i+1} = s$. Based on historical data and hindsight knowledge, one can estimate $P(X_{i+1} = j | X_{i} = k)$, and $P(S_{i} = s | X_{i} = j)$. These two conditional probabilities as well as the three equations form the basics of HMM algorithm.
+
+**Forward Probability (Forward Algorithm)**
+
+The forward probability, denoted as $\alpha_t(i)$, represents the probability of being in state $i$ at time $t$ given the observed sequence up to time $t$. It is computed using the forward algorithm:
+
+\begin{align}
+\alpha_t(i) = P(X_t = i | Y_{1:t}) = P(Y_t | X_t = i) \sum_{j} P(X_t = i | X_{t-1} = j) \alpha_{t-1}(j)
+\end{align}
+
+**Backward Probability (Backward Algorithm)** 
+
+The backward probability, denoted as $\beta_t(i)$, represents the probability of observing the sequence from time $t+1$ to the end, given that the system is in state $i$ at time $t$. It is computed using the backward algorithm:
+
+
+\begin{align}
+\beta_t(i) = P(Y_{t+1:T} | X_t = i) = \sum_{j} P(Y_{t+1} | X_{t+1} = j) P(X_{t+1} = j | X_t = i) \beta_{t+1}(j)
+\end{align}
+
+**Conditional Probability (Decoding)**
+
+The conditional probability, denoted as $\gamma_t(i)$, represents the probability of being in state $i$ at time $t$ given the entire observed sequence. It is used for decoding:
+
+\begin{align}
+\gamma_t(i) = P(X_t = i | Y_{1:T}) = \frac{\alpha_t(i) \beta_t(i)}{P(Y_{1:T})}
+\end{align}
+
+The conditional probability can be calculated as:
+
+\begin{align}
+\gamma_t(i) = \frac{\alpha_t(i) \beta_t(i)}{P(Y_{1:T})}
+\end{align}
+
+**Basic Interpretation** 
+
+We need to initialize the algorithm. Thus, we always assume some probability distribution of states at the first or initial state, where the chain begins. Then, using a set of backward and forward steps, we calculate the 
+probability of transitioning to a given state from the most recent possible step in the chain. Then we apply conditional probabilities of observing emitted signal to get the intermediate state of transitions. And then we 
+repeat the cycle. Conditional probability, or decoding step, then brings together all pieces of the calculation, 
+which gives us the desired probability of being in state $i$ after observing a sequence of emitted signals. 
+
+In a sense, instead of evaluating transitions directly from state to state as time goes on, look at the 
+'transition' from state $i$ to signal $s$ and then into state $j$. This intermediate step gives un the best 
+guess at what the true state at time $t$ could have been. 
+
+# Inputs and Data Elements 
+
+### Transition Matrix 
+
+In order to conduct our analysis, we need two matrices. First, a matrix of transition probabilities. In practice, one 
+might look at historical records and calculate these conditional probabilities. In the context of plants' analysis, 
+a detail oriented person can take a record of plants' health, or condition, and give these time series data 
+to a statistician for analysis. An example of the matrix that I used in my analysis is in @fig-t-mat. 
+
+For example, $P(X_{i+1} = j| X_{i} = k$) can be $P(X_{i+1} = Good \ Health | X_{i} = Good \ Health) = 0.6$
+
+```{r define transition matrix for example }
+#| label: fig-t-mat
+#| fig-cap: "Transition probability matrix for the analysis"
+
+
+transition_m =
+          
+  matrix(  # to good | to sick | to dead 
+          c(0.6,       0.2,       0.2, # from good 
+            0.3,       0.4,       0.3,  # from sick 
+            0,         0,         1  # from dead 
+           ), 
+          
+          nrow = 3, ncol = 3) %>% t()
+
+transition_m_show = transition_m
+
+colnames(transition_m_show) <- c("Good", "Sick", "Dead")
+rownames(transition_m_show) <- c("Good", "Sick", "Dead")
+
+kable(transition_m_show, 
+      booktabs = T, 
+      digits = 2) %>% 
+  kable_styling(full_width = F, 
+                bootstrap_options = "condensed") %>% 
+  column_spec(1:4, width = "1cm")
+```
+
+Second, we need a matrix with probabilities of observing a signal given a particular state. Such a matrix is given in 
+@fig-e-mat. 
+
+For example, $P(S_{i} = j| X_{i} = k$) can be $P(X_{i+1} = Dead \ Leaf | X_{i} = Good \ Health) = 0.6$
+
+```{r define emission matrix }
+#| label: fig-e-mat
+#| fig-cap: "Signal emission probability matrix for the analysis"
+
+
+emission_m = 
+  matrix( #     good | sick | dead 
+          c(
+                0.8,    0.7,  0.5, # prob nothing given col.state
+                0.1,    0.2,  0.3, # prob marks 
+                0.1,    0.1,  0.2  # dead leaf
+          ),  
+         nrow = 3, ncol = 3) 
+
+
+rownames(emission_m) <- c("g", "m", 'd')
+
+emission_m_show <- emission_m
+
+
+rownames(emission_m_show) <- c("Nothing", "Marks on Leafs", "Dead Leaf")
+colnames(emission_m_show) <- c("Good", "Sick", "Dead")
+
+kable(emission_m_show, 
+      booktabs = T, 
+      digits = 2) %>% 
+  kable_styling(full_width = F, 
+                bootstrap_options = "condensed") %>% 
+  column_spec(1:4, width = "1cm")
+```
+
+To recap, the hidden states are the true health condition of a plant, which are $Good \ Health$, $'Sick'$ due to 
+some factors such as over or under watering, and $'Dead'$ or $'Dying'$ plant. 
+
+Observed states are some markers that can be indicative of plant's health. These markers are $Nothing$, indicating
+no new problems, new $Marks \ on \ Leafs$ which indicate some problems, and new $Dead \ leaves$ indicating potentially some serious problems. 
+
+```{r define sequence of events that we observe and make data for plotting }
+# 
+# set.seed(1)
+# 
+# signal_seq_trial <- c(
+#   sample(c("g", "m", "d"), size = 10, replace = TRUE, prob = c(0.7, 0.2, 0.1)), 
+#   sample(c("g", "m", "d"), size = 10, replace = TRUE, prob = c(0.1, 0.5, 0.4)), 
+#   sample(c("g", "m", "d"), size = 10, replace = TRUE, prob = c(0, 0.5, 0.5))
+# )
+
+signal_seq_trial <- 
+  c("g", "g", "g", "m", "g", "g", "m", "g", "g", "g", 
+    "g", "g", "m", "d", "d", "d", "m", "m", "g", "m", 
+    "m", "m", "g", 'm', 'g', "g", "m", "m", "m", "m", 
+    "m", "m", "g", 'm', 'd', "d", "m", "d", "d", "d")
+
+signal_seq_trial_d <- 
+  data.frame(
+    condition = signal_seq_trial, 
+    obs = seq(from = 1, to = length(signal_seq_trial), by = 1)
+  ) %>% 
+  mutate(
+    g_flag = ifelse(condition == 'g', 1, 0),
+    m_flag = ifelse(condition == 'm', 1, 0),
+    d_flag = ifelse(condition == 'd', 1, 0), 
+    
+    good = cumsum(g_flag),
+    marks = cumsum(m_flag),
+    dead = cumsum(d_flag)
+  ) %>% 
+  select(obs, good, marks, dead) %>% 
+  pivot_longer(cols = c("good", "marks", "dead"), 
+               values_to = "counts", 
+               names_to = "types") %>% 
+  mutate(prop = counts/obs)
+
+ggplot(data = signal_seq_trial_d, 
+       aes(x = obs, y = counts, color = types, group = types)
+       ) + 
+  theme_classic() + 
+  theme(legend.position = "bottom") + 
+  geom_step() + 
+  scale_x_continuous(breaks = seq(from = 0, to = max(signal_seq_trial_d$obs), length.out = 4), 
+                     labels = function(x){round(x) * 3}) +
+  
+  labs(y = "Count", 
+       x = "Days of Observation", 
+       title = "Count of Observed Emited Signals", 
+       color = "Emitted Signal") -> p1 
+
+ggplot(data = signal_seq_trial_d, 
+       aes(x = obs, y = prop, color = types, group = types)
+       ) + 
+  theme_classic() + 
+  theme(legend.position = "bottom") + 
+  geom_step() + 
+  scale_x_continuous(breaks = seq(from = 0, to = max(signal_seq_trial_d$obs), length.out = 4), 
+                     labels = function(x){round(x) * 3}) +
+  
+  labs(y = "Count", 
+       x = "Days of Observation", 
+       title = "Proportion of Observed Emited Signals", 
+       color = "Emitted Signal") -> p2 
+```
+
+# Results 
+
+### Application of Algorithms 
+
+To initiate the analysis, we also pick marginal probabilities for each state before the first transition. 
+$P(Good \ Health) = 0.7$, $P(Sickness) = 0.2$, and $P(Dead \ or \ Dying) = 0.1$
+
+@fig-one-run shows results of our analysis. Left plot shows estimated probability using HMM forward and backward equations, while a plot of the right shows accumulation of emitted signals over time. Instead of giving you a 
+sequence with 30 emitted signals, a plot shows you that for the most part, we observed mostly 'good' emitted states, 
+no new bad marks or dead leafs. Periodically, we saw some marks, and after about 10 observational periods (30-something days) we started to see some dead leaves. Black vertical line shows a point in time when we saw the very first dead leaf. Given that we did not see *more* dead leaves, the probabilities quickly reverted to the more or 
+less stable rates. 
+
+
+```{r}
+#| label: fig-one-run
+#| fig-cap: "One Run of HMM with Fixed Probabiltiies"
+#| fig-width: 12
+#| fig-height: 8
+
+plot_data = run_one_HMM(signal_seq = signal_seq_trial, 
+                        starting_prob = c(0.7, 0.2, 0.1),
+                        transitions_m = transition_m, 
+                        emissions_m = emission_m)
+
+grid.arrange(
+  nrow = 1, 
+ 
+  ggplot(data = plot_data, 
+         aes(x = obs, 
+             y = prob, 
+             group = type, 
+             color = type)) + 
+    theme_classic() + 
+    theme(legend.position = "bottom") + 
+    scale_y_continuous(breaks = seq(from = 0, to = 1, by = 0.1), 
+                       limits = c(0,1)) + 
+    scale_x_continuous(breaks = seq(from = 0, to = max(plot_data$obs), length.out = 4), 
+                       labels = function(x){round(x) * 3}) +
+    
+    geom_line() + 
+    labs(y = "Probability", 
+         x = "Days of Observation", 
+         title = "Results of Probability Estiamtion from one run of HMM model ", 
+         color = "Plant State") + 
+    
+    geom_vline(xintercept = min(which(signal_seq_trial == "d")), linewidth = 1, 
+               linetype = "dashed", color = "black"), 
+  
+   p1
+)
+
+
+```
+
+### Confidence Bounds 
+
+```{r function name: adjust_many_hmm_runs}
+
+adjust_many_hmm_runs <- function(
+    reps, 
+    information_beta, 
+    sd_normal, 
+    seed = 1257, 
+    transition_m = transition_m, 
+    emission_m = emission_m, 
+    signal_seq_trial = signal_seq_trial, 
+    sampling){
+  
+  set.seed(seed)
+  
+  results_replicate <- 
+    data.frame(
+      obs =  rep(NA, 3 * (length(signal_seq_trial) + 1) * reps), 
+      prob = rep(NA, 3 * (length(signal_seq_trial) + 1) * reps), 
+      type = rep("", 3 * (length(signal_seq_trial) + 1) * reps), 
+      rep_id = NA
+      )
+
+  for(i in 1:reps){
+    
+    if(sampling == "beta"){
+      {
+        p_good_good <- rbeta(n = 1, shape1 = transition_m[1,1]*information_beta, 
+                             shape2 = (information_beta-transition_m[1,1]*information_beta))
+        
+        p_good_sick <- rbeta(n = 1, shape1 = transition_m[1,2]*information_beta, 
+                             shape2 = (information_beta-transition_m[1,2]*information_beta))
+        
+        p_good_dead <- rbeta(n = 1, shape1 = transition_m[1,3]*information_beta, 
+                             shape2 = (information_beta-transition_m[1,3]*information_beta))
+        
+        
+        p_good_good_f <- p_good_good/(p_good_good + p_good_sick + p_good_dead)
+        p_good_sick_f <- p_good_sick/(p_good_good + p_good_sick + p_good_dead)
+        p_good_dead_f <- p_good_dead/(p_good_good + p_good_sick + p_good_dead)
+        
+        p_sick_good <- rbeta(n = 1, shape1 = transition_m[2,1]*information_beta, 
+                             shape2 = (information_beta-transition_m[2,1]*information_beta))
+        
+        p_sick_sick <- rbeta(n = 1, shape1 = transition_m[2,2]*information_beta, 
+                             shape2 = (information_beta-transition_m[2,2]*information_beta))
+        
+        p_sick_dead <- rbeta(n = 1, shape1 = transition_m[2,3]*information_beta, 
+                             shape2 = (information_beta-transition_m[1,3]*information_beta))
+        
+        p_sick_good_f <- p_sick_good/(p_sick_good + p_sick_sick + p_sick_dead)
+        p_sick_sick_f <- p_sick_sick/(p_sick_good + p_sick_sick + p_sick_dead)
+        p_sick_dead_f <- p_sick_dead/(p_sick_good + p_sick_sick + p_sick_dead)
+        
+        p_dead_good = 0
+        p_dead_sick = 0
+        p_dead_dead = 1
+        
+        transition_m_iter =
+                  
+          matrix(  # to good | to sick | to dead 
+                  c(p_good_good_f,       p_good_sick_f,       p_good_dead_f, # from good 
+                    p_sick_good_f,       p_sick_sick_f,       p_sick_dead_f,  # from sick 
+                    p_dead_good,       p_dead_sick,       p_dead_dead  # from dead 
+                   ), 
+                  
+                  ncol = 3, nrow = 3) %>% t()
+      }
+      
+      {
+        p_nothin_w_good <- rbeta(n = 1, shape1 = emission_m[1,1]*information_beta, 
+                                 shape2 = (information_beta-emission_m[1,1]*information_beta))
+        
+        p_mark_w_good   <- rbeta(n = 1, shape1 = emission_m[1,2]*information_beta, 
+                                 shape2 = (information_beta-emission_m[1,2]*information_beta))
+        
+        p_leaf_w_good   <- rbeta(n = 1, shape1 = emission_m[1,3]*information_beta, 
+                                 shape2 = (information_beta-emission_m[1,3]*information_beta))
+        
+        p_nothin_w_good_f <- p_nothin_w_good/(p_nothin_w_good + p_mark_w_good + p_leaf_w_good)
+        p_mark_w_good_f  <- p_mark_w_good/(p_nothin_w_good + p_mark_w_good + p_leaf_w_good)
+        p_leaf_w_good_f <- p_leaf_w_good/(p_nothin_w_good + p_mark_w_good + p_leaf_w_good)
+        
+        p_nothin_w_sick <- rbeta(n = 1, shape1 = emission_m[2,1]*information_beta, 
+                                 shape2 = (information_beta-emission_m[2,1]*information_beta))
+        
+        p_mark_w_sick  <-  rbeta(n = 1, shape1 = emission_m[2,2]*information_beta, 
+                                 shape2 = (information_beta-emission_m[2,2]*information_beta))
+        
+        p_leaf_w_sick  <-  rbeta(n = 1, shape1 = emission_m[2,3]*information_beta, 
+                                 shape2 = (information_beta-emission_m[2,3]*information_beta))
+        
+        p_nothin_w_sick_f <- p_nothin_w_sick/(p_nothin_w_sick + p_mark_w_sick + p_leaf_w_sick)
+        p_mark_w_sick_f  <- p_mark_w_sick/(p_nothin_w_sick + p_mark_w_sick + p_leaf_w_sick)
+        p_leaf_w_sick_f <- p_leaf_w_sick/(p_nothin_w_sick + p_mark_w_sick + p_leaf_w_sick)
+        
+        p_nothin_w_dead <- rbeta(n = 1, shape1 = emission_m[3,1]*information_beta, 
+                                 shape2 = (information_beta-emission_m[3,1]*information_beta))
+        
+        p_mark_w_dead  <- rbeta(n = 1, shape1 = emission_m[3,2]*information_beta, 
+                                shape2 = (information_beta-emission_m[3,2]*information_beta))
+        
+        p_leaf_w_dead  <- rbeta(n = 1, shape1 = emission_m[3,3]*information_beta, 
+                                shape2 = (information_beta-emission_m[3,3]*information_beta))
+        
+        p_nothin_w_dead_f <- p_nothin_w_dead/(p_nothin_w_dead + p_mark_w_dead + p_leaf_w_dead)
+        p_mark_w_dead_f  <- p_mark_w_dead/(p_nothin_w_dead + p_mark_w_dead + p_leaf_w_dead)
+        p_leaf_w_dead_f <- p_leaf_w_dead/(p_nothin_w_dead + p_mark_w_dead + p_leaf_w_dead)
+        
+        emission_m_iter = 
+          matrix( #     good | sick | dead 
+                  c(
+                        p_nothin_w_good_f,    p_nothin_w_sick_f,  p_nothin_w_dead_f, # prob nothing given col.state
+                        p_mark_w_good_f,      p_mark_w_sick_f,  p_mark_w_dead_f, # prob marks 
+                        p_leaf_w_good_f,      p_leaf_w_sick_f,  p_leaf_w_dead_f  # dead leaf
+                  ),  
+                 nrow = 3, ncol = 3)
+        
+      rownames(emission_m_iter) <- c("g", "m", 'd')
+      }
+    }
+    
+    if(sampling == "normal"){
+      {
+        p_good_good <- clip_01(rnorm(n = 1, mean = transition_m[1,1], sd = sd_normal))
+        p_good_sick <- clip_01(rnorm(n = 1, mean = transition_m[1,2], sd = sd_normal))
+        p_good_dead <- clip_01(rnorm(n = 1, mean = transition_m[1,3], sd = sd_normal))
+        
+        p_good_good_f <- p_good_good/(p_good_good + p_good_sick + p_good_dead)
+        p_good_sick_f <- p_good_sick/(p_good_good + p_good_sick + p_good_dead)
+        p_good_dead_f <- p_good_dead/(p_good_good + p_good_sick + p_good_dead)
+        
+        p_sick_good <- clip_01(rnorm(n = 1, mean = transition_m[2,1], sd = sd_normal))
+        p_sick_sick <- clip_01(rnorm(n = 1, mean = transition_m[2,2], sd = sd_normal))
+        p_sick_dead <- clip_01(rnorm(n = 1, mean = transition_m[2,3], sd = sd_normal))
+        
+        p_sick_good_f <- p_sick_good/(p_sick_good + p_sick_sick + p_sick_dead)
+        p_sick_sick_f <- p_sick_sick/(p_sick_good + p_sick_sick + p_sick_dead)
+        p_sick_dead_f <- p_sick_dead/(p_sick_good + p_sick_sick + p_sick_dead)
+        
+        p_dead_good = 0
+        p_dead_sick = 0
+        p_dead_dead = 1
+        
+        transition_m_iter =
+                  
+          matrix(  # to good | to sick | to dead 
+                  c(p_good_good_f,       p_good_sick_f,       p_good_dead_f, # from good 
+                    p_sick_good_f,       p_sick_sick_f,       p_sick_dead_f,  # from sick 
+                    p_dead_good,       p_dead_sick,       p_dead_dead  # from dead 
+                   ), 
+                  
+                  ncol = 3, nrow = 3) %>% t()
+      }
+      
+      {
+        p_nothin_w_good <- clip_01(rnorm(n = 1, mean = emission_m[1,1], sd = sd_normal))
+        p_mark_w_good   <- clip_01(rnorm(n = 1, mean = emission_m[1,2], sd = sd_normal))
+        p_leaf_w_good   <- clip_01(rnorm(n = 1, mean = emission_m[1,3], sd = sd_normal))
+        
+        p_nothin_w_good_f <- p_nothin_w_good/(p_nothin_w_good + p_mark_w_good + p_leaf_w_good)
+        p_mark_w_good_f  <- p_mark_w_good/(p_nothin_w_good + p_mark_w_good + p_leaf_w_good)
+        p_leaf_w_good_f <- p_leaf_w_good/(p_nothin_w_good + p_mark_w_good + p_leaf_w_good)
+        
+        p_nothin_w_sick <- clip_01(rnorm(n = 1, mean = emission_m[2,1], sd = sd_normal))
+        p_mark_w_sick  <-  clip_01(rnorm(n = 1, mean = emission_m[2,2], sd = sd_normal))
+        p_leaf_w_sick  <-  clip_01(rnorm(n = 1, mean = emission_m[2,3], sd = sd_normal))
+        
+        p_nothin_w_sick_f <- p_nothin_w_sick/(p_nothin_w_sick + p_mark_w_sick + p_leaf_w_sick)
+        p_mark_w_sick_f  <- p_mark_w_sick/(p_nothin_w_sick + p_mark_w_sick + p_leaf_w_sick)
+        p_leaf_w_sick_f <- p_leaf_w_sick/(p_nothin_w_sick + p_mark_w_sick + p_leaf_w_sick)
+        
+        p_nothin_w_dead <- clip_01(rnorm(n = 1, mean = emission_m[3,1], sd = sd_normal))
+        p_mark_w_dead  <-  clip_01(rnorm(n = 1, mean = emission_m[3,2], sd = sd_normal))
+        p_leaf_w_dead  <-  clip_01(rnorm(n = 1, mean = emission_m[3,3], sd = sd_normal))
+        
+        p_nothin_w_dead_f <- p_nothin_w_dead/(p_nothin_w_dead + p_mark_w_dead + p_leaf_w_dead)
+        p_mark_w_dead_f  <- p_mark_w_dead/(p_nothin_w_dead + p_mark_w_dead + p_leaf_w_dead)
+        p_leaf_w_dead_f <- p_leaf_w_dead/(p_nothin_w_dead + p_mark_w_dead + p_leaf_w_dead)
+        
+        emission_m_iter = 
+          matrix( #     good | sick | dead 
+                  c(
+                        p_nothin_w_good_f,    p_nothin_w_sick_f,  p_nothin_w_dead_f, # prob nothing given col.state
+                        p_mark_w_good_f,      p_mark_w_sick_f,  p_mark_w_dead_f, # prob marks 
+                        p_leaf_w_good_f,      p_leaf_w_sick_f,  p_leaf_w_dead_f  # dead leaf
+                  ),  
+                 nrow = 3, ncol = 3)
+        
+      rownames(emission_m_iter) <- c("g", "m", 'd')
+      }
+    }
+    
+    plot_data = run_one_HMM(signal_seq = signal_seq_trial, 
+                          starting_prob = c(0.7, 0.2, 0.1),
+                          transitions_m = transition_m_iter, 
+                          emissions_m = emission_m_iter)
+    
+    s = (i-1) * nrow(plot_data) + 1
+    f = (i)   * nrow(plot_data)
+    
+    results_replicate[(s:f), ] <- plot_data %>% mutate(rep_id = i)
+  }
+  
+  return(results_replicate)
+}
+
+```
+
+@fig-avg-run here 
+
+```{r}
+#| label: fig-avg-run
+#| fig-cap: "Average Results of 100 HMM Runs with Variable Probabiltiies"
+#| fig-width: 12
+#| fig-height: 8
+
+
+
+results_replicate <- 
+  adjust_many_hmm_runs(
+    reps = 10, 
+    information_beta = 10, 
+    sd_normal = NA, 
+    seed = 1257, 
+    transition_m = transition_m, 
+    emission_m = emission_m, 
+    signal_seq_trial = signal_seq_trial, 
+    sampling = "beta")
+
+grid.arrange(
+  nrow = 1, 
+  
+  ggplot(data = results_replicate, 
+         aes(x = obs, 
+             y = prob, 
+             group = type, 
+             color = type)) + 
+    theme_classic() + 
+    theme(legend.position = "bottom") + 
+    scale_y_continuous(breaks = seq(from = 0, to = 1, by = 0.1), 
+                       limits = c(0,1)) + 
+    scale_x_continuous(breaks = seq(from = 0, to = max(plot_data$obs), length.out = 4), 
+                       labels = function(x){round(x) * 3}) +
+    geom_smooth(method = "loess") + 
+    labs(y = "Probability", 
+         x = "Days of Observation", 
+         title = "Results of Probability Estiamtion from one run of HMM model ", 
+         color = "Plant State")+ 
+    
+    geom_vline(xintercept = min(which(signal_seq_trial == "d")), linewidth = 1, 
+               linetype = "dashed", color = "black"), 
+  
+  p2
+)
+
+```
+
+# Discussion, Conclusion, Futher Work 
+
+```{r compare smoothing from replications vs one run }
+
+grid.arrange(
+  nrow = 1, 
+  
+  ggplot(data = results_replicate, 
+         aes(x = obs, 
+             y = prob, 
+             group = type, 
+             color = type)) + 
+    theme_classic() + 
+    theme(legend.position = "bottom") + 
+    scale_y_continuous(breaks = seq(from = 0, to = 1, by = 0.1), 
+                       limits = c(0,1)) + 
+    scale_x_continuous(breaks = seq(from = 0, to = max(plot_data$obs), length.out = 4), 
+                       labels = function(x){round(x) * 3}) +
+    geom_smooth(method = "loess") + 
+    labs(y = "Probability", 
+         x = "Days of Observation", 
+         title = "Results of Probability Estiamtion from one run of HMM model ", 
+         color = "Plant State")+ 
+    
+    geom_vline(xintercept = min(which(signal_seq_trial == "d")), linewidth = 1, 
+               linetype = "dashed", color = "black"), 
+  
+  ggplot(data = plot_data, 
+         aes(x = obs, 
+             y = prob, 
+             group = type, 
+             color = type)) + 
+    theme_classic() + 
+    theme(legend.position = "bottom") + 
+    scale_y_continuous(breaks = seq(from = 0, to = 1, by = 0.1), 
+                       limits = c(0,1)) + 
+    scale_x_continuous(breaks = seq(from = 0, to = max(plot_data$obs), length.out = 4), 
+                       labels = function(x){round(x) * 3}) +
+    
+    geom_line(alpha = 0.25) +
+    geom_smooth() + 
+    labs(y = "Probability", 
+         x = "Days of Observation", 
+         title = "Results of Probability Estiamtion from one run of HMM model ", 
+         color = "Plant State") + 
+    
+    geom_vline(xintercept = min(which(signal_seq_trial == "d")), linewidth = 1, 
+               linetype = "dashed", color = "black")
+)
+
+```
+
+# Appendix 
+
+### Technical Details of Probability Sampling 
+
+### Sensetivity Test with normal distirbution for sampling 
+
+```{r run 100 HMMs and save results , eval = F}
+
+results_replicate <- 
+  adjust_many_hmm_runs(
+    reps = 10, 
+    information_beta = 2, 
+    sd_normal = NA, 
+    seed = 1257, 
+    transition_m = transition_m, 
+    emission_m = emission_m, 
+    signal_seq_trial = signal_seq_trial, 
+    sampling = "beta"
+    )
+
+summary(results_replicate)
+
+ggplot(data = results_replicate, 
+         aes(x = obs, 
+             y = prob, 
+             group = type, 
+             color = type)) + 
+    theme_classic() + 
+    theme(legend.position = "bottom") + 
+    scale_y_continuous(breaks = seq(from = 0, to = 1, by = 0.1), 
+                       limits = c(0,1)) + 
+    scale_x_continuous(breaks = seq(from = 0, to = max(plot_data$obs), length.out = 4), 
+                       labels = function(x){round(x) * 3}) +
+    geom_smooth(method = "loess") + 
+    labs(y = "Probability", 
+         x = "Days of Observation", 
+         title = "Results of Probability Estiamtion from one run of HMM model ", 
+         color = "Plant State")+ 
+    
+    geom_vline(xintercept = min(which(signal_seq_trial == "d")), linewidth = 1, 
+               linetype = "dashed", color = "black")
+```

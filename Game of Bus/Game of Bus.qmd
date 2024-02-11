@@ -1,0 +1,309 @@
+---
+title: "Drinking Games: Riding the Bus"
+author: "Denis Ostroushko" 
+format: html
+execute: 
+  warning: false
+  message: false 
+  echo: false 
+---
+
+<!-- 
+functions and global set ups 
+--> 
+
+```{r load fucntions and set rendering parameters }
+
+options(scipen = 99999, 
+        knirt.kable.na = '')
+
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(gridExtra)
+
+```
+
+# Introduction 
+
+Games of chance have a long and varied history, with evidence of such activities dating back to ancient civilizations.
+
+This ancient Greek game **Astragaloi** or *Knucklebones* involved  throwing small bones (knucklebones or astragaloi) and using the side that landed facing up for scoring. The game had various versions and was played for both fun and gambling.
+
+An ancient Mesopotamian board game **The Royal Game of Ur**, also known as the Game of Twenty Squares, dates back to around 2600 BCE. It involved a race between two players, and the movement of pieces was determined by the casting of four-sided dice. Some believe that the game had a religious significance.
+
+Gambling with dice was common during the medieval and Renaissance periods. Games like Hazard, a precursor to modern craps, were popular. Dice were often made from bone or ivory, and various forms of gambling were associated with them.
+
+Lotteries became popular in Industrial societies. While lotteries have a much longer history, they gained prominence during the 18th century in Europe and North America. Governments used lotteries to raise funds for public projects, and people purchased tickets for a chance to win prizes.
+
+The modern version of the roulette wheel, a popular casino game of chance, was developed in 18th-century France. It has since become a classic in casino gambling.
+
+Games of chance evolved over time, reflecting cultural changes and technological advancements. While the specific games may vary, the concept of taking a risk for the chance of gaining something of value has persisted across centuries and civilizations.
+
+Today's youth commonly uses card games at parties to play drinking games. Instead of monetary wagers we wager sips of 
+beverages. F the Dealer, Kings cup, and many other games are extremely popular. With my friends, [Ride the Bus](https://www.thrillist.com/culture/ride-the-bus-drinking-game) is the most common choice. 
+
+The game consists of three phases, and has many variations. In this article I looked at the last phase of the game 
+to understand the distribution of game outcomes, and amount of drinks a sore loser has to consume. 
+
+### Why do this? 
+
+As with any game of chance, your strategy contributes to the likelihood of success, but randomness still has a role to play. Before we get into how the game works, I will tell you that I witnessed a **FRIEND OF MINE WHO SHALL NOT BE NAMED** go through the deck of cards multiple times, making about 40 decisions before he successfully finished the game. Afterwards, other people finished their ride of the bus in a much, MUCH, smaller number of steps. 
+
+This crazy variance of a few data points sparked my interest in this little simulation case study. 
+
+# How the Game Works 
+
+### A working example 
+
+As I mentioned earlier, the game consists of multiple phases, but we focus on the last part, where one player is 
+playing against the dealer. While many variations of the game exist, we usually base our play with a small number of simple rules. 
+
+The game between a dealer and player begins with a 52-card deck. We begin by laying out six cards face down and 
+revealing one card to the player. Example of the setup is given in @fig-start
+
+```{r, fig.align='center'}
+#| label: fig-start
+#| fig-cap: "Start the Bus Ride"
+
+
+knitr::include_graphics("Start.jpeg")
+```
+
+The game begins with a player deciding if the next card to the right is higher or lower than the last card a player saw. A player will announce their choice to the dealer before flipping th card. If the player guesses correctly, the game continues, and another higher/lower choice is made. The game goes on until the player gets 6 correct guesses in a row. Suits play no role in this version of the game. 
+
+For example, with the same staring point of 'three of clubs' as a starting point, a player might get to a point in 
+a game displayed in @fig-example. The first choice would be 'higher than three', which would reveal 'nine'. 
+Next, a player might say 'lower', which would be a correct guess when 'six' is revealed. 'Six' is a lower card 
+in the 'two-to-ace' deck, so a good guess may be to go higher. This would be a faulty guess when we reveal a 'two'. 
+
+This choice would prompt the game to restart. 
+
+```{r, fig.align='center'}
+#| label: fig-example
+#| fig-cap: "Somewhere along the way"
+
+
+knitr::include_graphics("Example.jpeg")
+```
+
+An example of a restart is shown in @fig-restart. We discarded previous starting point, which was a 'three of clubs', 
+we deal three more cards for the three cards that we revealed. And then the last, fourth, card would be a Jack. 
+
+Because the player failed at the third guess, a player need to take three drinks/sips of their beverage. A ligher 
+bevarege is recommended for this game, for obvious reasons. 
+
+```{r, fig.align='center'}
+#| label: fig-restart
+#| fig-cap: "Start the Bus Ride Again"
+
+
+knitr::include_graphics("Restart.jpeg")
+```
+
+### Summary of the game rules 
+
+Bullet points below summarize the rules of the game. 
+
+* Starting point: deal six cards and reveal one on top of the deck to begin guessing 
+
+* At each step guess if the next (unknown) card is higher or lower than the last one 
+
+* If the guess is correct, we move one, a make a new guess based on the card we just revealed 
+
+* If we guess wrong, we count the number of guesses we make in the sequence. This is how many small drinks/sips a  player needs to do before the next round starts. 
+
+* The goal of the game is to make six correct guesses in a row
+
+# Analysis 
+
+### Goal 
+
+As outlined above, the game end and a player wins when they make six correct guesses in a row. The goal of my analysis is to obtain a distribution for the number of attempts until a player gets six in a row. 
+
+### Strategies 
+
+We debated many version of the best strategy for this game, and maybe all of them will be studied one day. Today, 
+we consider three strategies. 
+
+* **Total Randomness**: a horrible strategy where you guess higher or lower a random at each step. Nobody plays like this. I just want to know how bad one might be able to do in this game. 
+
+* **Simple**: based on one rule a player might want to stick with: 
+  - For example, in a deck of cards with 2, 3, 4, 5, 6, 7, 8, 9, 10, J, Q, K, A (Ace is high) we might pick 
+    *7* or *8* as a natural midpoint 
+    
+  - For my analysis, I pick 7 as a midpoint. So, if the last card is higher than '7', you always say than the 
+    next card is lower. For example, if you play against the last card '9', you guess that the next card is lower. 
+    
+  - This strategy seems robust, but it ignores information that has been revealed as the game goes on. 
+  
+* **The card counter**: this strategy is based on an assumption that you could potentially remember cards that were 
+already dealt, and cards that are still in the deck. 
+  
+  - Suppose a '7' was revealed. Hypothetically, you may count the number of cards that are still not revealed that 
+  are higher and lower than '7'. If more cards are left to play that are higher than '7', you make this guess. 
+  
+  - This strategy can be good at the extremes of dealt cards, like '2', '3', or 'Q', 'K', 'A', but is more of a 50/50
+    guess when the cards are towards the middle of the order. 
+    
+  - Also, this strategy may be better as more and more cards are revealed 
+
+### Results 
+
+```{r}
+
+results_dumb_df <- readRDS("dumb.rds")
+
+results_strategy_df <- readRDS("counting.rds")
+
+results_random_df <- readRDS("random.rds")
+```
+
+```{r}
+length_of_games_dumb <- 
+  results_dumb_df %>% 
+  group_by(Index) %>% 
+  summarise(L = n())
+
+length_of_games_smart <- 
+  results_strategy_df %>% 
+  group_by(Index) %>% 
+  summarise(L = n())
+
+length_of_games_random <- 
+  results_random_df %>% 
+  group_by(Index) %>% 
+  summarise(L = n())
+```
+
+To compare strategies, I ran 100,000 games for each strategy. To make things equal and account for deck specific 
+factors, I applied each strategy to the same deck of cards. Results are given in @tbl-results
+
+```{r}
+#| label: tbl-results
+#| tbl-cap: "Comparison of Strategies"
+
+rbind(
+  length_of_games_random %>% 
+    summarise(
+      mean_L = mean(L), 
+      median = median(L), 
+      q_25 = quantile(L, 0.25),
+      q_75 = quantile(L, 0.75), 
+      p_1 = length(which(L == 1))/nrow(.),
+      p_10_plus = length(which(L >= 10))/nrow(.), 
+      max = max(L)
+    ),
+  
+  length_of_games_dumb %>% 
+    summarise(
+      mean_L = mean(L), 
+      median = median(L), 
+      q_25 = quantile(L, 0.25),
+      q_75 = quantile(L, 0.75), 
+      p_1 = length(which(L == 1))/nrow(.),
+      p_10_plus = length(which(L >= 10))/nrow(.), 
+      max = max(L)
+    ),
+  
+  length_of_games_smart %>% 
+    summarise(
+      mean_L = mean(L), 
+      median = median(L), 
+      q_25 = quantile(L, 0.25),
+      q_75 = quantile(L, 0.75), 
+      p_1 = length(which(L == 1))/nrow(.),
+      p_10_plus = length(which(L >= 10))/nrow(.), 
+      max = max(L)
+    )
+  
+) %>% 
+  cbind(data.frame(Strategy = c("Random", "Simple", "Counting")), 
+        .) %>% 
+  mutate(p_1 = paste0(round(p_1, 4) * 100, "%") , 
+         p_10_plus = paste0(round(p_10_plus, 4) * 100, "%"),
+         mean_L = round(mean_L, 1)
+         ) %>% 
+  
+  kable(col.names = c("Strategy", "Average # Attempts", "Median # Attempts", "25th Quantile", "75th Quantile", 
+                      "% Finished on First Try", "% Finished on 10+ Tries", "Max # Attempts"), 
+        align = c('l', 
+                  rep('c', (length(.)-1))
+                  )
+        )
+
+ 
+```
+
+* Biggest shock to me was the fact that all summary statistics for a simpler strategy with 1 rule and a card counting 
+strategy are similar. It means that following a simple rule can help you do just as good as a professional card counter. 
+
+* It was also interesting to see that about quarter of all games finish in 1 go
+  - in my personal experience, this event is more rare
+  - it may suggest my friends need a better strategy))
+  
+* The variance and skewness of of this distribution is quite high, which is dictated by the shape of distributions, see @fig-distrs
+
+* If you play at random and have no strategy you might need to see a doctor at the end of the night 
+
+```{r}
+#| label: fig-distrs
+#| fig-cap: "Distirbution of # of attempts for the two strategies"
+#| fig-width: 10
+
+
+grid.arrange(
+  ggplot(data = length_of_games_smart, 
+       aes(x = L)) + 
+  theme_classic() + 
+  geom_histogram(binwidth = 1, fill = 'lightgrey', color = 'black') + 
+  
+  geom_vline(aes(xintercept = mean(length_of_games_smart$L), 
+             color = "Average"), 
+             linetype = "dashed", 
+             linewidth = 1)+
+  geom_vline(aes(xintercept = median(length_of_games_smart$L), 
+             color = "Median"), 
+             linetype = "dashed", 
+             linewidth = 1) + 
+  labs(x = "Game Length", 
+     y = "Count", 
+     title = "Card Counting Strategy", 
+     color = " ") + 
+  theme(legend.position = "bottom")
+  , 
+  
+  ggplot(data = length_of_games_dumb, 
+       aes(x = L)) + 
+  theme_classic() + 
+  geom_histogram(binwidth = 1, fill = 'lightgrey', color = 'black') + 
+
+  geom_vline(aes(xintercept = mean(length_of_games_dumb$L), 
+             color = "Average"), 
+             linetype = "dashed", 
+             linewidth = 1)+
+  geom_vline(aes(xintercept = median(length_of_games_dumb$L), 
+             color = "Median"), 
+             linetype = "dashed", 
+             linewidth = 1) + 
+  labs(x = "Game Length", 
+     y = "Count", 
+     title = "Simple Strategy", 
+     color = " ") + 
+  theme(legend.position = "bottom"), 
+  
+  nrow = 1
+)
+```
+
+# Conclusion  
+
+A game of bus is a simple game, where randomness seems to play more role than a complex strategy. One may want to 
+define a simple decision making rule based on a preferred card, and go with it. Games where you need to take 
+10 or more attempts to get six in a row are not so rare, with such runs occurring about 20% of the time
+for the two strategies we looked at. **My friend**, if you find yourself going through multiple white claws and 
+decks of cards, you just might be super unlucky every time. 
+
+# Appednix 
+
+Find my code 
